@@ -72,6 +72,11 @@ from utils.torch_utils import (
 )
 
 
+# wandb가 부모 프로세스에서만 실행되도록 제한
+def is_main_process():
+    return os.environ.get("RANK", "0") == "0" and int(os.environ.get("LOCAL_RANK", -1)) in (-1, 0)
+
+
 # LOGGERS = ("csv", "tb", "wandb", "clearml", "comet")  # *.csv, TensorBoard, Weights & Biases, ClearML
 LOGGERS = ("wandb",)  # *.csv, TensorBoard, Weights & Biases, ClearML
 
@@ -112,19 +117,21 @@ def train(hyp, opt, device, callbacks):
     yaml_save(save_dir / "hyp.yaml", hyp)
     yaml_save(save_dir / "opt.yaml", vars(opt))
 
-    # Loggers
-    loggers = Loggers(
-        save_dir=save_dir,
-        weights=weights,
-        opt=opt,
-        hyp=hyp,
-        logger=LOGGER,
-        include=tuple(LOGGERS),
-    )
+    loggers = None
+    if is_main_process():
+        loggers = Loggers(
+            save_dir=save_dir,
+            weights=weights,
+            opt=opt,
+            hyp=hyp,
+            logger=LOGGER,
+            include=tuple(LOGGERS),
+        )
 
     # Register actions
-    for k in methods(loggers):
-        callbacks.register_action(k, callback=getattr(loggers, k))
+    if is_main_process() and loggers is not None:
+        for k in methods(loggers):
+            callbacks.register_action(k, callback=getattr(loggers, k))
 
     # Process custom dataset artifact link
     data_dict = loggers.remote_dataset
@@ -269,10 +276,11 @@ def train(hyp, opt, device, callbacks):
             callbacks.run("on_train_batch_start")
             ni = i + nb * epoch  # number integrated batches (since train start)
 
-            if isinstance(imgs, list):
-                imgs = [img.to(device, non_blocking=True).float() / 255 for img in imgs]    # For RGB-T input
+                # RGB-T 입력이 list 또는 tuple 형태로 넘어올 수 있으므로 둘 다 처리
+            if isinstance(imgs, (list, tuple)):  
+                imgs = [img.to(device, non_blocking=True).float() / 255 for img in imgs]
             else:
-                imgs = imgs.to(device, non_blocking=True).float() / 255  # uint8 to float32, 0-255 to 0.0-1.0
+                imgs = imgs.to(device, non_blocking=True).float() / 255  # uint8 → float32, 0-255 → 0.0-1.0
 
             # Warmup
             if ni <= nw:
@@ -439,7 +447,7 @@ def parse_opt(known=False):
     parser.add_argument("--optimizer", type=str, choices=["SGD", "Adam", "AdamW"], default="SGD", help="optimizer")
     parser.add_argument("--sync-bn", action="store_true", help="use SyncBatchNorm, only available in DDP mode")
     parser.add_argument("--workers", type=int, default=16, help="max dataloader workers (per RANK in DDP mode)")
-    parser.add_argument("--project", default=ROOT / "runs/train", help="save to project/name")
+    parser.add_argument("--project", default=os.getenv("WANDB_PROJECT", ROOT / "runs/train"), help="save to project/name")
     parser.add_argument("--name", default="exp", help="save to project/name")
     parser.add_argument("--exist-ok", action="store_true", help="existing project/name ok, do not increment")
     parser.add_argument("--quad", action="store_true", help="quad dataloader")
