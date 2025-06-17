@@ -15,7 +15,7 @@ for line in all_lines:
     parts = line.split('/')
     if len(parts) < 6:
         continue
-    seq = parts[5][:11]  # "set00_V000" ← 이게 시퀀스 ID
+    seq = parts[5][:11] 
     seq_dict[seq].append(line + '\n')
 
 # 시퀀스 기준으로 shuffle → split
@@ -35,5 +35,3 @@ with open(os.path.join(output_dir, 'train_split.txt'), 'w') as f:
     f.writelines(train_lines)
 with open(os.path.join(output_dir, 'val_split.txt'), 'w') as f:
     f.writelines(val_lines)
-
-print(f"[✔] Train lines: {len(train_lines)}, Val lines: {len(val_lines)}")
